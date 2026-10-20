@@ -1,0 +1,12 @@
+.env
+.venv/
+venv/
+bin/
+_old/
+old/
+out/
+browser-profile/
+captures/
+__pycache__/
+*.py[cod]
+.pytest_cache/
