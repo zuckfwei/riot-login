@@ -1,34 +1,58 @@
 # Automatização Login Riot Client
 
-Este projeto implementa uma ferramenta que permite iniciar uma sessão no Riot Client de maneira automatizada. Ele usa a API local do cliente para iniciar o login e um navegador para obter a resposta do hCaptcha na página oficial da Riot. Se aparecer uma verificação interativa, ela precisa ser resolvida na janela do navegador.
+Este projeto implementa uma ferramenta experimental que permite iniciar uma sessão no Riot Client de maneira automatizada. Ele utiliza a API local do cliente para iniciar o login e um navegador para obter a resposta do hCaptcha. Caso seja solicitada uma verificação hCaptcha, ela deverá ser resolvida manualmente pelo usuário na janela do navegador.
 
-O programa trabalha com uma conta por execução. Com as credenciais preenchidas no `.env`, ele sempre encerra os processos do cliente, apaga os dados locais da sessão anterior e inicia um novo login com `RIOT_USER` e `RIOT_PASS`. O andamento fica em `out/login.log`. O programa não exporta contas nem cria um arquivo de sessão para uso posterior.
+O programa trabalha com uma conta por execução. Com as credenciais preenchidas no `.env`, ele encerra os processos do cliente, apaga os dados locais da sessão anterior e inicia um novo login com `RIOT_USER` e `RIOT_PASS`. O andamento fica registrado em `out/login.log`. O programa não exporta contas nem cria arquivos de sessão para uso posterior.
 
 ## Requisitos
 
-O projeto foi feito para Windows com Python 3.11. A leitura da API local usa dados dos processos do cliente e pode exigir que o terminal seja aberto como administrador. A execução real também fecha processos do Riot Client e altera seus dados locais de autenticação.
+O projeto foi desenvolvido para Windows com Python 3.11. A leitura da API local utiliza informações dos processos do cliente e pode exigir que o terminal seja executado como administrador. A execução também encerra processos do Riot Client e altera seus dados locais de autenticação.
 
-É necessário ter o Google Chrome instalado. Se ele ainda não estiver no computador, baixe o instalador na [página oficial do Google Chrome](https://www.google.com/chrome/) e conclua a instalação. `CHROME_EXE` pode ficar vazio. Nesse caso, o programa procura `chrome.exe` nas pastas comuns de instalação do Windows.
+É necessário ter o Google Chrome instalado. Caso ainda não esteja disponível, baixe o instalador na [página oficial do Google Chrome](https://www.google.com/chrome/) e conclua a instalação.
 
-## Preparação
+A variável `CHROME_EXE` pode permanecer vazia. Nesse caso, o programa procura automaticamente o `chrome.exe` nos diretórios comuns de instalação do Windows.
 
-```powershell
-python -m venv .venv
-.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
+Crie um arquivo `.env` na raiz do projeto utilizando `.env.example` como modelo.
 
-Crie um arquivo `.env` na raiz usando `.env.example` como modelo. Preencha `RIOT_USER` e `RIOT_PASS` com o login e a senha da conta. Em `CLIENTE_EXE`, informe o caminho do `RiotClientServices.exe` instalado no computador. Deixe `CHROME_EXE` vazio para usar a busca automática ou informe o caminho do `chrome.exe` se ele estiver em outro lugar.
+Configure as seguintes variáveis:
+
+- `RIOT_USER`: usuário da conta.
+- `RIOT_PASS`: senha da conta.
+- `CLIENTE_EXE`: caminho do `RiotClientServices.exe` instalado no computador.
+- `CHROME_EXE`: caminho do `chrome.exe`, caso não seja detectado automaticamente.
+
+O arquivo `.env` contém informações sensíveis e não deve ser publicado ou compartilhado.
 
 ## Uso
 
-Abra um PowerShell como adm na pasta do projeto e execute
+Abra o PowerShell como administrador na pasta do projeto e execute:
+
 ```powershell
 .venv\Scripts\python.exe src\main.py
 ```
-O primeiro pedido de login inicia o hCaptcha. O navegador abre a página da Riot, obtém a resposta e o programa tenta concluir a autenticação. Em seguida, confirma a sessão e acompanha a gravação da configuração local. O log detalha cada etapa.
 
-Se o serviço pedir autenticação em duas etapas, o programa registra a exigência e encerra com o código `6`. Credenciais recusadas encerram com `4`. Uma falha ao obter os dados do hCaptcha retorna `3`, e três tentativas sem login aceito retornam `5`. O código `2` indica configuração ausente ou indisponibilidade da API local. Uma falha inesperada retorna `9`.
+O programa utiliza os seguintes códigos de saída:
 
-## OBS
+| Código | Descrição |
+|---|---|
+| `2` | Configuração ausente ou API local indisponível. |
+| `3` | Falha ao obter os dados do hCaptcha. |
+| `4` | Credenciais recusadas. |
+| `5` | Três tentativas sem autenticação aceita. |
+| `6` | Autenticação em duas etapas necessária. |
+| `9` | Falha inesperada. |
 
-O diretório `out` contém o log. `browser-profile` guarda o perfil local do navegador usado pelo hCaptcha.
+## Arquivos locais
+
+O diretório `out` contém os logs de execução, incluindo `login.log`.
+
+O diretório `browser-profile` armazena o perfil local do navegador utilizado durante o processo de autenticação e resolução do hCaptcha.
+
+Esses diretórios podem conter informações sensíveis da execução e não devem ser compartilhados publicamente.
+
+## Finalidade e isenção de responsabilidade
+
+**Este projeto foi desenvolvido exclusivamente para fins educacionais, acadêmicos e de pesquisa**, com o objetivo de estudar o funcionamento de processos de autenticação, APIs locais, comunicação entre aplicações e técnicas de automação. O código é disponibilizado publicamente apenas como material de estudo e referência técnica.
+
+- O uso do código é de inteira responsabilidade de quem decidir executá-lo, modificá-lo ou distribuí-lo.
+- O usuário é responsável por verificar a conformidade de suas atividades com a legislação vigente e os termos de serviço das plataformas envolvidas.
