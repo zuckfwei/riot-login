@@ -1,4 +1,4 @@
-import os
+﻿import os
 from pathlib import Path
 
 
@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def load_config():
-    """lê o .env para setar paths e creds."""
+    """lÃª o .env para setar paths e creds."""
     values = {
         "RIOT_USER": "",
         "RIOT_PASS": "",
@@ -15,7 +15,7 @@ def load_config():
     }
     env_path = ROOT / ".env"
     if env_path.exists():
-        for line in env_path.read_text(encoding="utf-8").splitlines():
+        for line in env_path.read_text(encoding="utf-8-sig").splitlines():
             key, separator, value = line.partition("=")
             key = key.strip()
             if separator and key in values:

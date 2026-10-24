@@ -1,5 +1,7 @@
 """Navegador usado para abrir o login da Riot e resolver o hCaptcha."""
 
+import ctypes
+from ctypes import wintypes
 import json
 import os
 import time
@@ -45,8 +47,8 @@ def _find_browser(configured_path, log):
     raise RuntimeError("Chrome não encontrado. Instale o navegador ou corrija CHROME_EXE")
 
 
-def open_challenge(browser_executable, profile_dir, site_key, log):
-    """Abre a página oficial de login e mostra o widget de hCaptcha."""
+def open_browser(browser_executable, profile_dir, log):
+    """Abre o navegador configurado com o perfil local do programa."""
     from DrissionPage import ChromiumOptions, ChromiumPage
 
     browser_executable = _find_browser(browser_executable, log)
@@ -55,11 +57,73 @@ def open_challenge(browser_executable, profile_dir, site_key, log):
     options.set_browser_path(browser_executable)
     options.set_local_port(9333)
     options.set_user_data_path(str(profile_dir))
+    options.set_argument("--start-maximized")
     options.set_argument("--no-first-run")
     options.set_argument("--no-default-browser-check")
 
     page = ChromiumPage(addr_or_opts=options)
-    tab = page.new_tab("https://www.riotgames.com/en")
+    page.set.window.max()
+    return page
+
+
+def _keep_window_visible(page, tab, log):
+    """Restaura, maximiza e mantém no topo a janela do Chrome desta guia."""
+    if os.name != "nt":
+        return
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
+    user32.EnumWindows.restype = wintypes.BOOL
+    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.SetWindowPos.argtypes = [
+        wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+        ctypes.c_int, ctypes.c_int, wintypes.UINT,
+    ]
+    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+
+    process_id = page.browser.process_id
+    title = str(tab.title or "").casefold()
+    windows = []
+
+    @callback_type
+    def collect_window(handle, _):
+        window_pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(handle, ctypes.byref(window_pid))
+        if window_pid.value == process_id and user32.IsWindowVisible(handle):
+            length = user32.GetWindowTextLengthW(handle)
+            text = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(handle, text, len(text))
+            windows.append((handle, text.value))
+        return True
+
+    user32.EnumWindows(collect_window, 0)
+    if not windows:
+        log("Não encontrei a janela do Chrome para trazê-la ao topo")
+        return
+
+    handle = next(
+        (window for window, caption in windows if title and title in caption.casefold()),
+        windows[0][0],
+    )
+    page.activate_tab(tab.tab_id)
+    user32.ShowWindow(handle, 9)
+    page.set.window.max()
+    user32.SetWindowPos(handle, ctypes.c_void_p(-1), 0, 0, 0, 0, 0x43)
+    user32.SetForegroundWindow(handle)
+    log("Chrome maximizado e mantido no topo")
+
+
+def open_login_page(browser_executable, profile_dir, log):
+    """Prepara a página oficial enquanto o serviço prepara a sessão."""
+    page = open_browser(browser_executable, profile_dir, log)
+    tab = page.get_tab()
+    tab.get("https://www.riotgames.com/en")
+    _keep_window_visible(page, tab, log)
     log("Navegador pronto")
 
     deadline = time.time() + 30
@@ -73,7 +137,7 @@ def open_challenge(browser_executable, profile_dir, site_key, log):
         time.sleep(1)
 
     action = tab.run_js(FIND_SIGN_IN)
-    log("Link de entrada, " + str(action)[:200])
+    log("Abrindo a página oficial de autenticação")
     if isinstance(action, str) and action.startswith("href:"):
         tab.run_js("location.href = " + json.dumps(action[5:]) + ";")
 
@@ -82,7 +146,6 @@ def open_challenge(browser_executable, profile_dir, site_key, log):
         if "authenticate.riotgames.com" in str(tab.url or ""):
             break
         time.sleep(1)
-    log("Página de login, " + str(tab.url or "")[:110])
 
     deadline = time.time() + 40
     loaded = False
@@ -94,10 +157,15 @@ def open_challenge(browser_executable, profile_dir, site_key, log):
         if loaded:
             break
         time.sleep(1)
-    log("hCaptcha carregado, " + str(loaded))
     if not loaded:
         raise RuntimeError("hcaptcha.js não carregou")
+    log("Página de autenticação e hCaptcha prontos")
+    _keep_window_visible(page, tab, log)
+    return page, tab
 
+
+def render_challenge(tab, site_key):
+    """Cria o widget somente depois de obter o desafio da sessão atual."""
     render_widget = """
 if (window.__WID2) {
     hcaptcha.reset(window.__WID2);
@@ -111,9 +179,7 @@ document.body.appendChild(container);
 window.__WID2 = hcaptcha.render(container, {sitekey: SITE_KEY, theme: 'light'});
 return String(window.__WID2);
 """.replace("SITE_KEY", json.dumps(site_key))
-    widget_id = tab.run_js(render_widget)
-    log("Widget ID " + str(widget_id))
-    return page, tab
+    tab.run_js(render_widget)
 
 
 def solve_challenge(tab, challenge_data, log, timeout=180):
@@ -133,30 +199,30 @@ try {
 }
 """.replace("CHALLENGE_DATA", json.dumps(challenge_data))
     tab.run_js(execute_widget)
-    log("hCaptcha iniciado. Resolva a verificação na janela se ela aparecer")
+    log("Aguardando o captcha manual na janela do navegador")
 
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        time.sleep(2)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         try:
             state = json.loads(tab.run_js("return JSON.stringify(window.__H2)") or "{}")
         except Exception:
             state = {}
         if state.get("tok"):
-            log("Token do widget recebido, tamanho " + str(len(state["tok"])))
+            log("Captcha resolvido; enviando a resposta à API")
             return state["tok"]
         if state.get("err"):
             log("Erro do widget, " + str(state["err"])[:140])
             return None
+        time.sleep(0.2)
     log("Tempo esgotado no widget")
     return None
 
 
 def close_challenge(page, tab):
-    """Fecha a aba usada para obter o captcha."""
+    """Limpa o captcha na mesma guia e deixa uma única janela aberta."""
     if page is None:
         return
     try:
-        page.close_tabs(tabs=tab)
+        tab.get("about:blank")
     except Exception:
         pass

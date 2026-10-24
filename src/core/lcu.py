@@ -1,63 +1,52 @@
 """Comunicação com a API local do Riot Client."""
 
 import base64
+from functools import lru_cache
 import json
 import ssl
 import time
 import urllib.error
 import urllib.request
 
-from utils.processes import find_riot_cmdlines
+@lru_cache(maxsize=1)
+def _local_tls_context():
+    """A conexão loopback usa certificado próprio; não carrega CAs públicas inutilmente."""
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
 
 
-def _argument(command_line, name):
-    """Extrai um argumento no formato do cmd do cliente."""
-    marker = name + "="
-    start = command_line.find(marker)
-    if start < 0:
-        return ""
-    remainder = command_line[start + len(marker):]
-    end = remainder.find(" --")
-    value = remainder if end < 0 else remainder[:end]
-    return value.strip().strip('"')
+def wait_for_api(port, token, seconds=60):
+    """Espera o autenticador ficar acessível na conexão criada pelo programa."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        status, response = request(
+            port, token, "GET", "/rso-authenticator/v1/authentication", timeout=2
+        )
+        if status == 200 and isinstance(response, dict):
+            return True
+        time.sleep(0.5)
+    return False
 
 
-def find_lcu():
-    """Obtém porta e token da primeira instância acessível do cliente."""
-    for command_line in find_riot_cmdlines().values():
-        port = _argument(command_line, "--app-port")
-        token = _argument(command_line, "--remoting-auth-token")
-        if port.isdigit() and token:
-            return int(port), token
-    return None
-
-
-def wait_for_lcu(seconds=180):
-    """Espera o processo publicar porta e token da API local."""
-    deadline = time.time() + seconds
-    while time.time() < deadline:
-        connection = find_lcu()
-        if connection:
-            return connection
-        time.sleep(3)
-    return None
-
-
-def request(port, token, method, path, body=None):
+def request(port, token, method, path, body=None, *, timeout=15):
     """Faz uma chamada à API local e devolve código HTTP e corpo decodificado."""
     url = "https://127.0.0.1:" + str(port) + path
-    data = json.dumps(body).encode() if body is not None else None
+    data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
     http_request = urllib.request.Request(url, data=data, method=method)
     credentials = base64.b64encode(("riot:" + token).encode()).decode()
     http_request.add_header("Authorization", "Basic " + credentials)
-    http_request.add_header("Content-Type", "application/json")
+    http_request.add_header("Content-Type", "application/json; charset=utf-8")
 
-    context = ssl.create_default_context()
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE
+    context = _local_tls_context()
+    # A API é sempre loopback. Não encaminhar suas credenciais a um proxy.
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=context)
+    )
 
     try:
-        with urllib.request.urlopen(http_request, context=context, timeout=15) as response:
+        with opener.open(http_request, timeout=timeout) as response:
             raw = response.read().decode("utf-8", errors="replace")
             status = response.status
     except urllib.error.HTTPError as error:
